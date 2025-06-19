@@ -2,6 +2,9 @@ from dash import Dash, html, dcc, dash_table, Input, Output
 import pandas as pd
 import plotly.express as px
 import dash_bootstrap_components as dbc
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
 
 # Carga de datos
 df = pd.read_excel("analfabetismo_mundial_2000_2025.xlsx")
@@ -28,6 +31,8 @@ app.layout = dbc.Container([
         dcc.Tab(label="🗺 Información por País", value="tab4"),
         dcc.Tab(label="📊 Gráficas Avanzadas", value="tab5"),
         dcc.Tab(label="🎂 Distribución por Edad", value="tab6"),
+        dcc.Tab(label="📉 Predicción 2030", value="tab7"),
+
     ]),
     html.Div(id="contenido-tab")
 ], fluid=True, style={
@@ -169,6 +174,38 @@ def renderizar_contenido(tab):
             ),
             dcc.Graph(id='grafico-pastel'),
         ])
+    elif tab == "tab7":
+        resumen = df.groupby('Año')[['Analfabetas']].mean().reset_index()
+        modelo = LinearRegression()
+        X = resumen['Año'].values.reshape(-1, 1)
+        y = resumen['Analfabetas'].values
+        modelo.fit(X, y)
+        anio_pred = np.array([[2030]])
+        prediccion = modelo.predict(anio_pred)[0]
+        resumen_pred = resumen.copy()
+        resumen_pred.loc[len(resumen_pred.index)] = [2030, prediccion]
+
+        fig_pred = px.line(resumen_pred, x="Año", y="Analfabetas", markers=True,
+                           title="Predicción de Analfabetismo Mundial hasta 2030")
+        fig_pred.add_scatter(x=[2030], y=[prediccion], mode='markers+text',
+                             marker=dict(color='red', size=12),
+                             text=[f"{int(prediccion):,}"], textposition="top center",
+                             name="Predicción 2030")
+
+        return html.Div([
+            html.H3("📉 Predicción Global y por País para el año 2030"),
+            html.H5("🌍 Predicción Global"),
+            html.P(f"Se estima que en el año 2030 habrá aproximadamente {int(prediccion):,} personas analfabetas en el mundo."),
+            dcc.Graph(figure=fig_pred),
+            html.Hr(),
+            html.H5("🌎 Predicción por País"),
+            dcc.Dropdown(
+                id='dropdown-pais-pred',
+                options=[{'label': p, 'value': p} for p in df['País'].unique()],
+                placeholder="Selecciona un país para ver la predicción"
+            ),
+            dcc.Graph(id='grafico-pred-pais')
+        ])
 
 # Callback para manejar paginación o mostrar todos (fuera de la función renderizar_contenido)
 @app.callback(
@@ -253,6 +290,38 @@ def actualizar_grafico_pastel(pais, anio):
         )
         return fig
     return px.pie(values=[1], names=["Seleccione país y año"], title="Esperando selección...")
+@app.callback(
+    Output('grafico-pred-pais', 'figure'),
+    Input('dropdown-pais-pred', 'value')
+)
+def prediccion_por_pais(pais):
+    if pais:
+        df_pais = df[df['País'] == pais]
+        if df_pais.empty:
+            return px.line(title=f"No hay datos suficientes para {pais}")
+
+        resumen = df_pais.groupby('Año')[['Analfabetas']].mean().reset_index()
+        if resumen.shape[0] < 2:
+            return px.line(title=f"No hay suficientes datos históricos para predecir en {pais}")
+
+        modelo = LinearRegression()
+        X = resumen['Año'].values.reshape(-1, 1)
+        y = resumen['Analfabetas'].values
+        modelo.fit(X, y)
+
+        anio_pred = np.array([[2030]])
+        prediccion = modelo.predict(anio_pred)[0]
+
+        resumen.loc[len(resumen.index)] = [2030, prediccion]
+
+        fig = px.line(resumen, x='Año', y='Analfabetas', markers=True,
+                      title=f"Predicción de Analfabetismo en {pais} hasta 2030")
+        fig.add_scatter(x=[2030], y=[prediccion], mode='markers+text',
+                        marker=dict(color='red', size=12),
+                        text=[f"{int(prediccion):,}"], textposition="top center",
+                        name="Predicción 2030")
+        return fig
+    return px.line(title="Selecciona un país para ver su predicción")
 
 # Ejecutar servidor
 import os
